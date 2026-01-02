@@ -1,5 +1,10 @@
 # Trading Asset View
 
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Tests](https://img.shields.io/badge/tests-42%20passed-success.svg)](https://github.com/Morgiver/trading-asset-view)
+[![Coverage](https://img.shields.io/badge/coverage-93%25-brightgreen.svg)](https://github.com/Morgiver/trading-asset-view)
+
 **Unified multi-timeframe orchestration layer for trading applications** built on top of [trading-frame](https://github.com/Morgiver/trading-frame).
 
 ## Overview

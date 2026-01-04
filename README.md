@@ -107,8 +107,7 @@ asset_view = AssetView("BTC/USDT", timeframes=["1T", "5T", "1H"])
 
 # Prefill until all timeframes have enough data (default: max_periods)
 for candle in historical_data:
-    status = asset_view.prefill(candle)
-    if all(status.values()):
+    if asset_view.prefill(candle):
         print("All timeframes ready!")
         break  # Warm-up complete
 
@@ -122,8 +121,7 @@ for candle in live_data:
 ```python
 # Option 1: Target specific number of closed periods
 for candle in historical_data:
-    status = asset_view.prefill(candle, target_periods=50)
-    if all(status.values()):
+    if asset_view.prefill(candle, target_periods=50):
         break  # All timeframes have 50+ closed periods
 
 # Option 2: Target specific timestamp
@@ -131,25 +129,22 @@ target_date = datetime(2024, 1, 1, 12, 0, 0)
 target_ts = target_date.timestamp()
 
 for candle in historical_data:
-    status = asset_view.prefill(candle, target_timestamp=target_ts)
-    if all(status.values()):
+    if asset_view.prefill(candle, target_timestamp=target_ts):
         break  # Reached target date
 ```
 
 ### Monitor Progress
 
 ```python
-# Track progress per timeframe
+# Track progress during prefill
 for i, candle in enumerate(historical_data):
-    status = asset_view.prefill(candle, target_periods=20)
+    is_complete = asset_view.prefill(candle, target_periods=20)
 
     # Print progress every 10 candles
     if i % 10 == 0:
-        ready = [tf for tf, done in status.items() if done]
-        pending = [tf for tf, done in status.items() if not done]
-        print(f"Ready: {ready}, Pending: {pending}")
+        print(f"Prefill in progress... ({i+1} candles processed)")
 
-    if all(status.values()):
+    if is_complete:
         print(f"Prefill complete after {i+1} candles")
         break
 ```
@@ -169,8 +164,7 @@ asset_view.add_indicator_to_all(SMA(period=20), "SMA_20")
 warmup_complete = False
 for candle in all_data:
     if not warmup_complete:
-        status = asset_view.prefill(candle, target_periods=30)
-        if all(status.values()):
+        if asset_view.prefill(candle, target_periods=30):
             print("Warm-up complete, starting backtest...")
             warmup_complete = True
     else:
@@ -186,7 +180,7 @@ for candle in all_data:
 ### Key Features
 
 - ✅ **Silent operation**: No events emitted during prefill (efficient warm-up)
-- ✅ **Per-timeframe tracking**: Returns dict showing which timeframes are ready
+- ✅ **Simple boolean return**: Returns `True` when ALL timeframes reach target
 - ✅ **Flexible targets**: Use `target_periods`, `target_timestamp`, or default `max_periods`
 - ✅ **Automatic**: Handles different timeframe completion rates (1T fills faster than 1H)
 

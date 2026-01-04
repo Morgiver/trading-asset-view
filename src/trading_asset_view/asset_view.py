@@ -118,7 +118,7 @@ class AssetView:
         candle: Candle,
         target_periods: Optional[int] = None,
         target_timestamp: Optional[float] = None
-    ) -> Dict[str, bool]:
+    ) -> bool:
         """
         Feed candle to all timeframes and check if prefill targets are reached.
 
@@ -131,8 +131,7 @@ class AssetView:
             target_timestamp: Stop when candle timestamp >= this value
 
         Returns:
-            Dict mapping timeframe to completion status (True if target reached)
-            When all values are True, prefill is complete for all timeframes
+            True if ALL timeframes have reached their target, False otherwise
 
         Raises:
             ValueError: If both targets specified or neither specified
@@ -141,21 +140,18 @@ class AssetView:
         Example:
             # Fill all timeframes until each has max_periods closed periods
             >>> for candle in historical_data:
-            ...     status = asset_view.prefill(candle)
-            ...     if all(status.values()):
+            ...     if asset_view.prefill(candle):
             ...         break  # All timeframes ready
 
             # Fill until specific timestamp
             >>> target = datetime(2024, 1, 1).timestamp()
             >>> for candle in historical_data:
-            ...     status = asset_view.prefill(candle, target_timestamp=target)
-            ...     if all(status.values()):
+            ...     if asset_view.prefill(candle, target_timestamp=target):
             ...         break
 
             # Fill with specific period count per timeframe
             >>> for candle in historical_data:
-            ...     status = asset_view.prefill(candle, target_periods=50)
-            ...     if all(status.values()):
+            ...     if asset_view.prefill(candle, target_periods=50):
             ...         break  # All timeframes have 50+ closed periods
         """
         if not isinstance(candle, Candle):
@@ -182,7 +178,8 @@ class AssetView:
             )
             status[tf] = is_complete
 
-        return status
+        # Return True only if ALL timeframes are complete
+        return all(status.values())
 
     def get_frame(self, timeframe: str) -> TimeFrame:
         """

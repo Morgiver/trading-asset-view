@@ -352,13 +352,14 @@ class TestPrefill:
         ]
 
         # Prefill until each timeframe has 10 closed periods
+        is_complete = False
         for candle in candles:
-            status = asset_view.prefill(candle, target_periods=10)
-            if all(status.values()):
+            is_complete = asset_view.prefill(candle, target_periods=10)
+            if is_complete:
                 break
 
         # Check that all timeframes reached target
-        assert all(status.values())
+        assert is_complete is True
         # 1T should have >= 10 closed periods
         assert len(asset_view["1T"].periods) >= 10
         # 5T should have >= 10 closed periods
@@ -381,13 +382,14 @@ class TestPrefill:
         ]
 
         # Prefill with default (max_periods)
+        is_complete = False
         for candle in candles:
-            status = asset_view.prefill(candle)
-            if all(status.values()):
+            is_complete = asset_view.prefill(candle)
+            if is_complete:
                 break
 
         # Should reach max_periods limit
-        assert status["1T"] is True
+        assert is_complete is True
         assert len(asset_view["1T"].periods) == 10  # max_periods limit
 
     def test_prefill_with_target_timestamp(self):
@@ -411,16 +413,17 @@ class TestPrefill:
         ]
 
         # Prefill until target timestamp
+        is_complete = False
         for candle in candles:
-            status = asset_view.prefill(candle, target_timestamp=target_ts)
-            if all(status.values()):
+            is_complete = asset_view.prefill(candle, target_timestamp=target_ts)
+            if is_complete:
                 break
 
         # All timeframes should reach target
-        assert all(status.values())
+        assert is_complete is True
 
-    def test_prefill_returns_status_dict(self):
-        """Test that prefill returns status dictionary."""
+    def test_prefill_returns_bool(self):
+        """Test that prefill returns a boolean."""
         asset_view = AssetView("BTC/USDT", timeframes=["1T", "5T", "1H"])
 
         candle = Candle(
@@ -432,15 +435,10 @@ class TestPrefill:
             volume=100.0
         )
 
-        status = asset_view.prefill(candle, target_periods=1)
+        result = asset_view.prefill(candle, target_periods=1)
 
-        # Should return dict with all timeframes
-        assert isinstance(status, dict)
-        assert "1T" in status
-        assert "5T" in status
-        assert "1H" in status
-        # Values should be boolean
-        assert isinstance(status["1T"], bool)
+        # Should return a boolean
+        assert isinstance(result, bool)
 
     def test_prefill_validates_parameters(self):
         """Test that prefill validates parameters correctly."""
@@ -464,7 +462,7 @@ class TestPrefill:
             asset_view.prefill("not a candle", target_periods=10)
 
     def test_prefill_multi_timeframe_completion(self):
-        """Test that prefill tracks completion for all timeframes independently."""
+        """Test that prefill returns True only when ALL timeframes are complete."""
         asset_view = AssetView("BTC/USDT", timeframes=["1T", "5T"])
 
         candles = [
@@ -476,20 +474,24 @@ class TestPrefill:
                 close=50500.0,
                 volume=100.0
             )
-            for i in range(6)
+            for i in range(15)
         ]
 
         # Feed candles and track status
-        statuses = []
+        results = []
         for candle in candles:
-            status = asset_view.prefill(candle, target_periods=2)
-            statuses.append(status.copy())
+            result = asset_view.prefill(candle, target_periods=2)
+            results.append(result)
 
         # 1T completes faster (2 closed periods at candle 3)
         # 5T needs more candles (2 closed periods needs 10+ candles for 5min periods)
+        # Early results should be False (not all timeframes complete)
+        assert results[0] is False
+        assert results[1] is False
+        assert results[2] is False
 
-        # At some point 1T should be True
-        assert any(s["1T"] for s in statuses)
+        # Eventually all timeframes complete
+        assert any(results)
 
     def test_prefill_does_not_emit_events(self):
         """Test that prefill does NOT emit events (warm-up phase)."""

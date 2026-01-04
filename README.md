@@ -2,8 +2,7 @@
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/tests-42%20passed-success.svg)](https://github.com/Morgiver/trading-asset-view)
-[![Coverage](https://img.shields.io/badge/coverage-93%25-brightgreen.svg)](https://github.com/Morgiver/trading-asset-view)
+[![Tests](https://img.shields.io/badge/tests-49%20passed-success.svg)](https://github.com/Morgiver/trading-asset-view)
 
 **Unified multi-timeframe orchestration layer for trading applications** built on top of [trading-frame](https://github.com/Morgiver/trading-frame).
 
@@ -78,6 +77,7 @@ asset_view.add_indicator_to_all(sma, "SMA_20")  # All timeframes
 ## Complete Documentation
 
 ### Table of Contents
+- [Warm-Up with Prefill](#warm-up-with-prefill)
 - [Event Management](#event-management)
 - [Historical Data Loading](#historical-data-loading)
 - [Unified Exports](#unified-exports)
@@ -85,6 +85,110 @@ asset_view.add_indicator_to_all(sma, "SMA_20")  # All timeframes
 - [Statistics & Metrics](#statistics--metrics)
 - [Temporal Alignment](#temporal-alignment)
 - [Indicator Management](#indicator-management)
+
+---
+
+## Warm-Up with Prefill
+
+Efficiently fill all timeframes during initialization or backtesting warm-up phase.
+
+### Why Prefill?
+
+When starting live trading or backtesting, you need historical data to calculate indicators (e.g., RSI needs 14 periods). Instead of manually tracking when each timeframe is ready, use `prefill()` to automate this process.
+
+### Basic Usage
+
+```python
+from datetime import datetime
+from trading_frame import Candle
+from trading_asset_view import AssetView
+
+asset_view = AssetView("BTC/USDT", timeframes=["1T", "5T", "1H"])
+
+# Prefill until all timeframes have enough data (default: max_periods)
+for candle in historical_data:
+    status = asset_view.prefill(candle)
+    if all(status.values()):
+        print("All timeframes ready!")
+        break  # Warm-up complete
+
+# Now ready for live trading
+for candle in live_data:
+    asset_view.feed(candle)  # Use normal feed
+```
+
+### Prefill with Custom Target
+
+```python
+# Option 1: Target specific number of closed periods
+for candle in historical_data:
+    status = asset_view.prefill(candle, target_periods=50)
+    if all(status.values()):
+        break  # All timeframes have 50+ closed periods
+
+# Option 2: Target specific timestamp
+target_date = datetime(2024, 1, 1, 12, 0, 0)
+target_ts = target_date.timestamp()
+
+for candle in historical_data:
+    status = asset_view.prefill(candle, target_timestamp=target_ts)
+    if all(status.values()):
+        break  # Reached target date
+```
+
+### Monitor Progress
+
+```python
+# Track progress per timeframe
+for i, candle in enumerate(historical_data):
+    status = asset_view.prefill(candle, target_periods=20)
+
+    # Print progress every 10 candles
+    if i % 10 == 0:
+        ready = [tf for tf, done in status.items() if done]
+        pending = [tf for tf, done in status.items() if not done]
+        print(f"Ready: {ready}, Pending: {pending}")
+
+    if all(status.values()):
+        print(f"Prefill complete after {i+1} candles")
+        break
+```
+
+### Backtest Example
+
+```python
+from trading_frame.indicators import RSI, SMA
+
+asset_view = AssetView("BTC/USDT", timeframes=["1T", "5T", "1H"])
+
+# Add indicators
+asset_view.add_indicator("1T", RSI(length=14), "RSI_14")
+asset_view.add_indicator_to_all(SMA(period=20), "SMA_20")
+
+# Phase 1: Warm-up (silent, no events, no trading signals)
+warmup_complete = False
+for candle in all_data:
+    if not warmup_complete:
+        status = asset_view.prefill(candle, target_periods=30)
+        if all(status.values()):
+            print("Warm-up complete, starting backtest...")
+            warmup_complete = True
+    else:
+        # Phase 2: Live backtest (events enabled, generate signals)
+        asset_view.feed(candle)
+
+        # Your trading logic here
+        rsi = asset_view["1T"].periods[-1].RSI_14
+        if rsi and rsi < 30:
+            print(f"BUY signal at {candle.date}")
+```
+
+### Key Features
+
+- ✅ **Silent operation**: No events emitted during prefill (efficient warm-up)
+- ✅ **Per-timeframe tracking**: Returns dict showing which timeframes are ready
+- ✅ **Flexible targets**: Use `target_periods`, `target_timestamp`, or default `max_periods`
+- ✅ **Automatic**: Handles different timeframe completion rates (1T fills faster than 1H)
 
 ---
 

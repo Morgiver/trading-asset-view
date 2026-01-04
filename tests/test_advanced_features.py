@@ -333,12 +333,12 @@ class TestConsistencyValidation:
 class TestPrefill:
     """Test prefill functionality for warm-up phase."""
 
-    def test_prefill_with_target_periods(self):
-        """Test prefill with target_periods parameter."""
-        asset_view = AssetView("BTC/USDT", timeframes=["1T", "5T"], max_periods=100)
+    def test_prefill_to_capacity(self):
+        """Test prefill fills all frames to max_periods capacity."""
+        asset_view = AssetView("BTC/USDT", timeframes=["1T", "5T"], max_periods=10)
 
-        # Need enough candles for 10 closed periods on 5T timeframe
-        # 10 closed 5T periods = 11 periods total = 11 * 5 = 55 candles minimum
+        # Need enough candles to fill both timeframes to 10 periods
+        # 5T is slower, so we need at least 50+ candles
         candles = [
             Candle(
                 date=datetime(2024, 1, 1, 12, i, 0),
@@ -348,22 +348,20 @@ class TestPrefill:
                 close=50500.0 + i,
                 volume=100.0
             )
-            for i in range(60)  # Increased from 30 to 60
+            for i in range(60)
         ]
 
-        # Prefill until each timeframe has 10 closed periods
+        # Prefill until all timeframes at max_periods
         is_complete = False
         for candle in candles:
-            is_complete = asset_view.prefill(candle, target_periods=10)
+            is_complete = asset_view.prefill(candle)
             if is_complete:
                 break
 
-        # Check that all timeframes reached target
+        # Check that all timeframes reached max_periods
         assert is_complete is True
-        # 1T should have >= 10 closed periods
-        assert len(asset_view["1T"].periods) >= 10
-        # 5T should have >= 10 closed periods
-        assert len(asset_view["5T"].periods) >= 10
+        assert len(asset_view["1T"].periods) == 10  # max_periods
+        assert len(asset_view["5T"].periods) == 10  # max_periods
 
     def test_prefill_with_default_max_periods(self):
         """Test prefill with default max_periods target."""
@@ -392,9 +390,9 @@ class TestPrefill:
         assert is_complete is True
         assert len(asset_view["1T"].periods) == 10  # max_periods limit
 
-    def test_prefill_with_target_timestamp(self):
-        """Test prefill with target_timestamp parameter."""
-        asset_view = AssetView("BTC/USDT", timeframes=["1T", "5T"])
+    def test_prefill_with_target_timestamp_relaxed(self):
+        """Test prefill with target_timestamp in relaxed mode (require_full=False)."""
+        asset_view = AssetView("BTC/USDT", timeframes=["1T", "5T"], max_periods=100)
 
         base_time = datetime(2024, 1, 1, 12, 0, 0)
         target_time = datetime(2024, 1, 1, 12, 10, 0)
@@ -412,15 +410,42 @@ class TestPrefill:
             for i in range(20)
         ]
 
-        # Prefill until target timestamp
+        # Prefill until target timestamp (relaxed mode - don't require max_periods)
         is_complete = False
         for candle in candles:
-            is_complete = asset_view.prefill(candle, target_timestamp=target_ts)
+            is_complete = asset_view.prefill(candle, target_timestamp=target_ts, require_full=False)
             if is_complete:
                 break
 
-        # All timeframes should reach target
+        # Should reach target timestamp
         assert is_complete is True
+
+    def test_prefill_with_target_timestamp_validated(self):
+        """Test prefill with target_timestamp in validated mode (require_full=True)."""
+        from trading_frame.exceptions import InsufficientDataError
+
+        asset_view = AssetView("BTC/USDT", timeframes=["1T"], max_periods=100)
+
+        base_time = datetime(2024, 1, 1, 12, 0, 0)
+        target_time = datetime(2024, 1, 1, 12, 5, 0)  # Only 5 minutes of data
+        target_ts = target_time.timestamp()
+
+        candles = [
+            Candle(
+                date=base_time + timedelta(minutes=i),
+                open=50000.0,
+                high=51000.0,
+                low=49000.0,
+                close=50500.0,
+                volume=100.0
+            )
+            for i in range(6)  # Not enough to reach max_periods=100
+        ]
+
+        # Prefill with validation should raise InsufficientDataError
+        with pytest.raises(InsufficientDataError, match="Reached target timestamp but only have"):
+            for candle in candles:
+                asset_view.prefill(candle, target_timestamp=target_ts, require_full=True)
 
     def test_prefill_returns_bool(self):
         """Test that prefill returns a boolean."""
@@ -435,35 +460,22 @@ class TestPrefill:
             volume=100.0
         )
 
-        result = asset_view.prefill(candle, target_periods=1)
+        result = asset_view.prefill(candle)
 
         # Should return a boolean
         assert isinstance(result, bool)
 
-    def test_prefill_validates_parameters(self):
-        """Test that prefill validates parameters correctly."""
+    def test_prefill_validates_candle_type(self):
+        """Test that prefill validates candle type correctly."""
         asset_view = AssetView("BTC/USDT", timeframes=["1T"])
-
-        candle = Candle(
-            date=datetime(2024, 1, 1, 12, 0, 0),
-            open=50000.0,
-            high=51000.0,
-            low=49000.0,
-            close=50500.0,
-            volume=100.0
-        )
-
-        # Both parameters raises error
-        with pytest.raises(ValueError, match="Specify either target_periods or target_timestamp"):
-            asset_view.prefill(candle, target_periods=10, target_timestamp=123456.0)
 
         # Invalid candle type
         with pytest.raises(TypeError, match="Expected Candle instance"):
-            asset_view.prefill("not a candle", target_periods=10)
+            asset_view.prefill("not a candle")
 
     def test_prefill_multi_timeframe_completion(self):
-        """Test that prefill returns True only when ALL timeframes are complete."""
-        asset_view = AssetView("BTC/USDT", timeframes=["1T", "5T"])
+        """Test that prefill returns True only when ALL timeframes reach max_periods."""
+        asset_view = AssetView("BTC/USDT", timeframes=["1T", "5T"], max_periods=5)
 
         candles = [
             Candle(
@@ -474,17 +486,17 @@ class TestPrefill:
                 close=50500.0,
                 volume=100.0
             )
-            for i in range(15)
+            for i in range(30)
         ]
 
         # Feed candles and track status
         results = []
         for candle in candles:
-            result = asset_view.prefill(candle, target_periods=2)
+            result = asset_view.prefill(candle)
             results.append(result)
 
-        # 1T completes faster (2 closed periods at candle 3)
-        # 5T needs more candles (2 closed periods needs 10+ candles for 5min periods)
+        # 1T completes faster (5 periods at candle 5)
+        # 5T needs more candles (5 periods needs 25 candles for 5min periods)
         # Early results should be False (not all timeframes complete)
         assert results[0] is False
         assert results[1] is False
@@ -513,7 +525,7 @@ class TestPrefill:
             volume=100.0
         )
 
-        asset_view.prefill(candle, target_periods=1)
+        asset_view.prefill(candle)
 
         # Should NOT have emitted candle_fed event (prefill is silent)
         assert len(events_received) == 0

@@ -116,8 +116,8 @@ class AssetView:
     def prefill(
         self,
         candle: Candle,
-        target_periods: Optional[int] = None,
-        target_timestamp: Optional[float] = None
+        target_timestamp: Optional[float] = None,
+        require_full: bool = True
     ) -> bool:
         """
         Feed candle to all timeframes and check if prefill targets are reached.
@@ -127,54 +127,63 @@ class AssetView:
 
         Parameters:
             candle: Candle to process
-            target_periods: Stop when this many CLOSED periods reached per timeframe (default: max_periods)
-            target_timestamp: Stop when candle timestamp >= this value
+            target_timestamp: Stop when candle timestamp >= this value (optional)
+            require_full: If True with timestamp, raises error if max_periods not reached at timestamp
+                         If False, just stops at timestamp regardless of period count (default: True)
 
         Returns:
             True if ALL timeframes have reached their target, False otherwise
 
         Raises:
-            ValueError: If both targets specified or neither specified
+            InsufficientDataError: If require_full=True and any frame not full at target timestamp
             TypeError: If candle is not a Candle instance
 
+        Modes:
+            1. Default (fill to capacity):
+               prefill(candle)
+               → Stop when ALL frames reach max_periods
+
+            2. Fill until timestamp (relaxed):
+               prefill(candle, target_timestamp=ts, require_full=False)
+               → Stop when timestamp reached (any number of periods)
+
+            3. Fill until timestamp (validated - RECOMMENDED):
+               prefill(candle, target_timestamp=ts, require_full=True)
+               → Stop when timestamp reached, RAISE if any frame not at max_periods
+
         Example:
-            # Fill all timeframes until each has max_periods closed periods
+            # Fill all timeframes until each reaches max_periods (default)
             >>> for candle in historical_data:
             ...     if asset_view.prefill(candle):
             ...         break  # All timeframes ready
 
-            # Fill until specific timestamp
-            >>> target = datetime(2024, 1, 1).timestamp()
-            >>> for candle in historical_data:
-            ...     if asset_view.prefill(candle, target_timestamp=target):
-            ...         break
+            # Fill until timestamp with validation (RECOMMENDED)
+            >>> target_ts = datetime(2024, 1, 1, 12, 0).timestamp()
+            >>> try:
+            ...     for candle in historical_data:
+            ...         if asset_view.prefill(candle, target_timestamp=target_ts):
+            ...             break  # All frames full at target date
+            ... except InsufficientDataError as e:
+            ...     print(f"Not enough historical data: {e}")
 
-            # Fill with specific period count per timeframe
+            # Fill until timestamp without validation (relaxed)
             >>> for candle in historical_data:
-            ...     if asset_view.prefill(candle, target_periods=50):
-            ...         break  # All timeframes have 50+ closed periods
+            ...     if asset_view.prefill(candle, target_timestamp=target_ts, require_full=False):
+            ...         break  # Reached target date (may not be full)
         """
         if not isinstance(candle, Candle):
             raise TypeError(f"Expected Candle instance, got {type(candle)}")
-
-        # Validate parameters (same as Frame.prefill)
-        if target_periods is not None and target_timestamp is not None:
-            raise ValueError("Specify either target_periods or target_timestamp, not both")
-
-        if target_periods is None and target_timestamp is None:
-            # Default to max_periods
-            target_periods = self._max_periods
 
         # Track completion status for each timeframe
         status = {}
 
         # Feed to all frames and check their status
         for tf, frame in self.frames.items():
-            # Use frame's prefill method
+            # Use frame's prefill method (may raise InsufficientDataError)
             is_complete = frame.prefill(
                 candle,
-                target_periods=target_periods,
-                target_timestamp=target_timestamp
+                target_timestamp=target_timestamp,
+                require_full=require_full
             )
             status[tf] = is_complete
 

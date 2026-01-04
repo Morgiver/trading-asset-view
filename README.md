@@ -2,7 +2,7 @@
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/tests-49%20passed-success.svg)](https://github.com/Morgiver/trading-asset-view)
+[![Tests](https://img.shields.io/badge/tests-50%20passed-success.svg)](https://github.com/Morgiver/trading-asset-view)
 
 **Unified multi-timeframe orchestration layer for trading applications** built on top of [trading-frame](https://github.com/Morgiver/trading-frame).
 
@@ -116,20 +116,27 @@ for candle in live_data:
     asset_view.feed(candle)  # Use normal feed
 ```
 
-### Prefill with Custom Target
+### Prefill with Target Timestamp
 
 ```python
-# Option 1: Target specific number of closed periods
-for candle in historical_data:
-    if asset_view.prefill(candle, target_periods=50):
-        break  # All timeframes have 50+ closed periods
+# Option 1: Fill until timestamp (validated mode - RECOMMENDED)
+# Raises InsufficientDataError if frames not full at target timestamp
+from trading_frame.exceptions import InsufficientDataError
 
-# Option 2: Target specific timestamp
 target_date = datetime(2024, 1, 1, 12, 0, 0)
 target_ts = target_date.timestamp()
 
+try:
+    for candle in historical_data:
+        if asset_view.prefill(candle, target_timestamp=target_ts, require_full=True):
+            break  # All frames full at target date
+except InsufficientDataError as e:
+    print(f"Not enough historical data before target date: {e}")
+
+# Option 2: Fill until timestamp (relaxed mode)
+# Stops at timestamp regardless of period count
 for candle in historical_data:
-    if asset_view.prefill(candle, target_timestamp=target_ts):
+    if asset_view.prefill(candle, target_timestamp=target_ts, require_full=False):
         break  # Reached target date
 ```
 
@@ -138,7 +145,7 @@ for candle in historical_data:
 ```python
 # Track progress during prefill
 for i, candle in enumerate(historical_data):
-    is_complete = asset_view.prefill(candle, target_periods=20)
+    is_complete = asset_view.prefill(candle)
 
     # Print progress every 10 candles
     if i % 10 == 0:
@@ -164,7 +171,7 @@ asset_view.add_indicator_to_all(SMA(period=20), "SMA_20")
 warmup_complete = False
 for candle in all_data:
     if not warmup_complete:
-        if asset_view.prefill(candle, target_periods=30):
+        if asset_view.prefill(candle):  # Fill to max_periods capacity
             print("Warm-up complete, starting backtest...")
             warmup_complete = True
     else:
@@ -181,8 +188,9 @@ for candle in all_data:
 
 - ✅ **Silent operation**: No events emitted during prefill (efficient warm-up)
 - ✅ **Simple boolean return**: Returns `True` when ALL timeframes reach target
-- ✅ **Flexible targets**: Use `target_periods`, `target_timestamp`, or default `max_periods`
+- ✅ **Three modes**: Default (fill to capacity), timestamp validated, timestamp relaxed
 - ✅ **Automatic**: Handles different timeframe completion rates (1T fills faster than 1H)
+- ✅ **Error handling**: Raises `InsufficientDataError` in validated mode if not enough data
 
 ---
 

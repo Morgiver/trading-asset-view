@@ -113,6 +113,77 @@ class AssetView:
         # Cleanup
         self._closed_timeframes = []
 
+    def prefill(
+        self,
+        candle: Candle,
+        target_periods: Optional[int] = None,
+        target_timestamp: Optional[float] = None
+    ) -> Dict[str, bool]:
+        """
+        Feed candle to all timeframes and check if prefill targets are reached.
+
+        Use this method during warm-up phase to fill all timeframes until
+        ALL of them reach their target condition.
+
+        Parameters:
+            candle: Candle to process
+            target_periods: Stop when this many CLOSED periods reached per timeframe (default: max_periods)
+            target_timestamp: Stop when candle timestamp >= this value
+
+        Returns:
+            Dict mapping timeframe to completion status (True if target reached)
+            When all values are True, prefill is complete for all timeframes
+
+        Raises:
+            ValueError: If both targets specified or neither specified
+            TypeError: If candle is not a Candle instance
+
+        Example:
+            # Fill all timeframes until each has max_periods closed periods
+            >>> for candle in historical_data:
+            ...     status = asset_view.prefill(candle)
+            ...     if all(status.values()):
+            ...         break  # All timeframes ready
+
+            # Fill until specific timestamp
+            >>> target = datetime(2024, 1, 1).timestamp()
+            >>> for candle in historical_data:
+            ...     status = asset_view.prefill(candle, target_timestamp=target)
+            ...     if all(status.values()):
+            ...         break
+
+            # Fill with specific period count per timeframe
+            >>> for candle in historical_data:
+            ...     status = asset_view.prefill(candle, target_periods=50)
+            ...     if all(status.values()):
+            ...         break  # All timeframes have 50+ closed periods
+        """
+        if not isinstance(candle, Candle):
+            raise TypeError(f"Expected Candle instance, got {type(candle)}")
+
+        # Validate parameters (same as Frame.prefill)
+        if target_periods is not None and target_timestamp is not None:
+            raise ValueError("Specify either target_periods or target_timestamp, not both")
+
+        if target_periods is None and target_timestamp is None:
+            # Default to max_periods
+            target_periods = self._max_periods
+
+        # Track completion status for each timeframe
+        status = {}
+
+        # Feed to all frames and check their status
+        for tf, frame in self.frames.items():
+            # Use frame's prefill method
+            is_complete = frame.prefill(
+                candle,
+                target_periods=target_periods,
+                target_timestamp=target_timestamp
+            )
+            status[tf] = is_complete
+
+        return status
+
     def get_frame(self, timeframe: str) -> TimeFrame:
         """
         Get TimeFrame instance for a specific timeframe.

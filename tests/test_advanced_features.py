@@ -328,3 +328,190 @@ class TestConsistencyValidation:
 
         # Should be consistent
         assert asset_view.validate_consistency() is True
+
+
+class TestPrefill:
+    """Test prefill functionality for warm-up phase."""
+
+    def test_prefill_with_target_periods(self):
+        """Test prefill with target_periods parameter."""
+        asset_view = AssetView("BTC/USDT", timeframes=["1T", "5T"], max_periods=100)
+
+        # Need enough candles for 10 closed periods on 5T timeframe
+        # 10 closed 5T periods = 11 periods total = 11 * 5 = 55 candles minimum
+        candles = [
+            Candle(
+                date=datetime(2024, 1, 1, 12, i, 0),
+                open=50000.0 + i,
+                high=51000.0 + i,
+                low=49000.0 + i,
+                close=50500.0 + i,
+                volume=100.0
+            )
+            for i in range(60)  # Increased from 30 to 60
+        ]
+
+        # Prefill until each timeframe has 10 closed periods
+        for candle in candles:
+            status = asset_view.prefill(candle, target_periods=10)
+            if all(status.values()):
+                break
+
+        # Check that all timeframes reached target
+        assert all(status.values())
+        # 1T should have >= 10 closed periods
+        assert len(asset_view["1T"].periods) >= 10
+        # 5T should have >= 10 closed periods
+        assert len(asset_view["5T"].periods) >= 10
+
+    def test_prefill_with_default_max_periods(self):
+        """Test prefill with default max_periods target."""
+        asset_view = AssetView("BTC/USDT", timeframes=["1T"], max_periods=10)
+
+        candles = [
+            Candle(
+                date=datetime(2024, 1, 1, 12, i, 0),
+                open=50000.0,
+                high=51000.0,
+                low=49000.0,
+                close=50500.0,
+                volume=100.0
+            )
+            for i in range(15)
+        ]
+
+        # Prefill with default (max_periods)
+        for candle in candles:
+            status = asset_view.prefill(candle)
+            if all(status.values()):
+                break
+
+        # Should reach max_periods limit
+        assert status["1T"] is True
+        assert len(asset_view["1T"].periods) == 10  # max_periods limit
+
+    def test_prefill_with_target_timestamp(self):
+        """Test prefill with target_timestamp parameter."""
+        asset_view = AssetView("BTC/USDT", timeframes=["1T", "5T"])
+
+        base_time = datetime(2024, 1, 1, 12, 0, 0)
+        target_time = datetime(2024, 1, 1, 12, 10, 0)
+        target_ts = target_time.timestamp()
+
+        candles = [
+            Candle(
+                date=base_time + timedelta(minutes=i),
+                open=50000.0,
+                high=51000.0,
+                low=49000.0,
+                close=50500.0,
+                volume=100.0
+            )
+            for i in range(20)
+        ]
+
+        # Prefill until target timestamp
+        for candle in candles:
+            status = asset_view.prefill(candle, target_timestamp=target_ts)
+            if all(status.values()):
+                break
+
+        # All timeframes should reach target
+        assert all(status.values())
+
+    def test_prefill_returns_status_dict(self):
+        """Test that prefill returns status dictionary."""
+        asset_view = AssetView("BTC/USDT", timeframes=["1T", "5T", "1H"])
+
+        candle = Candle(
+            date=datetime(2024, 1, 1, 12, 0, 0),
+            open=50000.0,
+            high=51000.0,
+            low=49000.0,
+            close=50500.0,
+            volume=100.0
+        )
+
+        status = asset_view.prefill(candle, target_periods=1)
+
+        # Should return dict with all timeframes
+        assert isinstance(status, dict)
+        assert "1T" in status
+        assert "5T" in status
+        assert "1H" in status
+        # Values should be boolean
+        assert isinstance(status["1T"], bool)
+
+    def test_prefill_validates_parameters(self):
+        """Test that prefill validates parameters correctly."""
+        asset_view = AssetView("BTC/USDT", timeframes=["1T"])
+
+        candle = Candle(
+            date=datetime(2024, 1, 1, 12, 0, 0),
+            open=50000.0,
+            high=51000.0,
+            low=49000.0,
+            close=50500.0,
+            volume=100.0
+        )
+
+        # Both parameters raises error
+        with pytest.raises(ValueError, match="Specify either target_periods or target_timestamp"):
+            asset_view.prefill(candle, target_periods=10, target_timestamp=123456.0)
+
+        # Invalid candle type
+        with pytest.raises(TypeError, match="Expected Candle instance"):
+            asset_view.prefill("not a candle", target_periods=10)
+
+    def test_prefill_multi_timeframe_completion(self):
+        """Test that prefill tracks completion for all timeframes independently."""
+        asset_view = AssetView("BTC/USDT", timeframes=["1T", "5T"])
+
+        candles = [
+            Candle(
+                date=datetime(2024, 1, 1, 12, i, 0),
+                open=50000.0,
+                high=51000.0,
+                low=49000.0,
+                close=50500.0,
+                volume=100.0
+            )
+            for i in range(6)
+        ]
+
+        # Feed candles and track status
+        statuses = []
+        for candle in candles:
+            status = asset_view.prefill(candle, target_periods=2)
+            statuses.append(status.copy())
+
+        # 1T completes faster (2 closed periods at candle 3)
+        # 5T needs more candles (2 closed periods needs 10+ candles for 5min periods)
+
+        # At some point 1T should be True
+        assert any(s["1T"] for s in statuses)
+
+    def test_prefill_does_not_emit_events(self):
+        """Test that prefill does NOT emit events (warm-up phase)."""
+        asset_view = AssetView("BTC/USDT", timeframes=["1T"])
+
+        events_received = []
+
+        def on_candle_fed(av, candle):
+            events_received.append('candle_fed')
+
+        asset_view.on('candle_fed', on_candle_fed)
+
+        candle = Candle(
+            date=datetime(2024, 1, 1, 12, 0, 0),
+            open=50000.0,
+            high=51000.0,
+            low=49000.0,
+            close=50500.0,
+            volume=100.0
+        )
+
+        asset_view.prefill(candle, target_periods=1)
+
+        # Should NOT have emitted candle_fed event (prefill is silent)
+        assert len(events_received) == 0

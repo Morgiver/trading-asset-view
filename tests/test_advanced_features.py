@@ -5,7 +5,7 @@ import tempfile
 import os
 from datetime import datetime, timedelta
 from trading_frame import Candle
-from trading_frame.indicators import SMA
+from trading_indicators import SMA
 from trading_asset_view import AssetView
 
 

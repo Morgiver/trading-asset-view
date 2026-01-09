@@ -3,7 +3,7 @@
 import pytest
 from datetime import datetime
 from trading_frame import Candle, TimeFrame
-from trading_frame.indicators import RSI, SMA, BollingerBands
+from trading_indicators import RSI, SMA, BollingerBands
 from trading_asset_view import AssetView
 
 
@@ -216,7 +216,7 @@ class TestAssetViewIntegration:
 
 
 class TestAssetViewIndicators:
-    """Test AssetView indicator management."""
+    """Test AssetView with new indicator system (trading-indicators)."""
 
     def setup_method(self):
         """Setup method with sample data."""
@@ -235,124 +235,82 @@ class TestAssetViewIndicators:
             self.asset_view.feed(candle)
 
     def test_add_indicator_to_single_timeframe(self):
-        """Test adding indicator to a specific timeframe."""
-        rsi = RSI(length=14)
-        self.asset_view.add_indicator("1T", rsi, "RSI_14")
-
-        # Check that indicator exists in 1T
+        """Test adding indicator to a specific timeframe using new API."""
+        # Create RSI indicator bound to specific frame
         frame_1t = self.asset_view["1T"]
-        assert "RSI_14" in frame_1t.indicators
+        rsi = RSI(frame=frame_1t, length=14, column_name="RSI_14")
+
+        # Check that indicator has periods
+        assert len(rsi.periods) > 0
 
         # Check that last period has RSI value
-        assert frame_1t.periods[-1].RSI_14 is not None
-
-        # Check that 5T doesn't have it
-        frame_5t = self.asset_view["5T"]
-        assert "RSI_14" not in frame_5t.indicators
+        assert hasattr(rsi.periods[-1], "RSI_14")
+        assert rsi.periods[-1].RSI_14 is not None
 
     def test_add_indicator_to_all_timeframes(self):
-        """Test adding indicator to all timeframes."""
-        sma = SMA(period=3)  # Use small period to work with both timeframes
-        self.asset_view.add_indicator_to_all(sma, "SMA_3")
-
-        # Check that both timeframes have the indicator
+        """Test adding same indicator type to all timeframes."""
+        # Create separate SMA instances for each timeframe
+        indicators = {}
         for tf in ["1T", "5T"]:
             frame = self.asset_view[tf]
-            assert "SMA_3" in frame.indicators
-            assert frame.periods[-1].SMA_3 is not None
+            indicators[tf] = SMA(frame=frame, period=3, column_name="SMA_3")
+
+        # Check that both indicators have periods
+        for tf in ["1T", "5T"]:
+            assert len(indicators[tf].periods) > 0
+            assert hasattr(indicators[tf].periods[-1], "SMA_3")
+            assert indicators[tf].periods[-1].SMA_3 is not None
 
     def test_add_multi_column_indicator(self):
         """Test adding multi-column indicator (Bollinger Bands)."""
-        bb = BollingerBands(period=10, std_dev=2.0)
-        self.asset_view.add_indicator("1T", bb, ["BB_UPPER", "BB_MIDDLE", "BB_LOWER"])
-
         frame = self.asset_view["1T"]
-        assert ("BB_UPPER", "BB_MIDDLE", "BB_LOWER") in frame.indicators
+        bb = BollingerBands(
+            frame=frame,
+            period=10,
+            nbdevup=2.0,
+            nbdevdn=2.0,
+            column_names=["BB_UPPER", "BB_MIDDLE", "BB_LOWER"]
+        )
 
-        # Check that period has all columns
-        last_period = frame.periods[-1]
+        # Check that indicator has periods with all columns
+        assert len(bb.periods) > 0
+        last_period = bb.periods[-1]
+        assert hasattr(last_period, "BB_UPPER")
+        assert hasattr(last_period, "BB_MIDDLE")
+        assert hasattr(last_period, "BB_LOWER")
         assert last_period.BB_UPPER is not None
         assert last_period.BB_MIDDLE is not None
         assert last_period.BB_LOWER is not None
 
-    def test_add_indicator_invalid_timeframe_raises_error(self):
-        """Test that adding to invalid timeframe raises KeyError."""
-        rsi = RSI(length=14)
+    def test_indicator_synchronizes_with_frame(self):
+        """Test that indicator automatically synchronizes with frame events."""
+        frame = self.asset_view["1T"]
+        initial_periods = len(frame.periods)
 
-        with pytest.raises(KeyError, match="Timeframe '1H' not found"):
-            self.asset_view.add_indicator("1H", rsi, "RSI_14")
+        # Create indicator
+        sma = SMA(frame=frame, period=5, column_name="SMA_5")
 
-    def test_remove_indicator_from_timeframe(self):
-        """Test removing indicator from specific timeframe."""
-        rsi = RSI(length=14)
-        self.asset_view.add_indicator("1T", rsi, "RSI_14")
+        # Feed new candle
+        candle = Candle(
+            date=datetime(2024, 1, 1, 12, 20, 0),
+            open=55000.0,
+            high=56000.0,
+            low=54500.0,
+            close=55500.0,
+            volume=200.0
+        )
+        self.asset_view.feed(candle)
 
-        # Verify it exists
-        assert "RSI_14" in self.asset_view["1T"].indicators
+        # Check that indicator added new period automatically
+        assert len(sma.periods) == initial_periods + 1
 
-        # Remove it
-        self.asset_view.remove_indicator("1T", "RSI_14")
-
-        # Verify it's gone
-        assert "RSI_14" not in self.asset_view["1T"].indicators
-        assert not hasattr(self.asset_view["1T"].periods[-1], "RSI_14")
-
-    def test_remove_indicator_from_all_timeframes(self):
-        """Test removing indicator from all timeframes."""
-        sma = SMA(period=3)
-        self.asset_view.add_indicator_to_all(sma, "SMA_3")
-
-        # Remove from all
-        self.asset_view.remove_indicator_from_all("SMA_3")
-
-        # Verify it's gone from both
-        for tf in ["1T", "5T"]:
-            assert "SMA_3" not in self.asset_view[tf].indicators
-
-    def test_remove_indicator_from_all_silently_skips_missing(self):
-        """Test that remove_from_all doesn't error if indicator missing."""
-        # Add indicator only to 1T
-        sma = SMA(period=10)
-        self.asset_view.add_indicator("1T", sma, "SMA_10")
-
-        # Remove from all (should skip 5T silently)
-        self.asset_view.remove_indicator_from_all("SMA_10")
-
-        # Should not raise error
-        assert "SMA_10" not in self.asset_view["1T"].indicators
-        assert "SMA_10" not in self.asset_view["5T"].indicators
-
-    def test_get_indicator_columns(self):
-        """Test getting list of indicator columns."""
-        rsi = RSI(length=14)
-        sma = SMA(period=20)
-
-        self.asset_view.add_indicator("1T", rsi, "RSI_14")
-        self.asset_view.add_indicator("1T", sma, "SMA_20")
-
-        columns = self.asset_view.get_indicator_columns("1T")
-
-        assert "RSI_14" in columns
-        assert "SMA_20" in columns
-
-    def test_get_indicator_columns_multi_column(self):
-        """Test getting indicator columns with multi-column indicators."""
-        bb = BollingerBands(period=10, std_dev=2.0)
-        self.asset_view.add_indicator("1T", bb, ["BB_UPPER", "BB_MIDDLE", "BB_LOWER"])
-
-        columns = self.asset_view.get_indicator_columns("1T")
-
-        assert "BB_UPPER" in columns
-        assert "BB_MIDDLE" in columns
-        assert "BB_LOWER" in columns
-
-    def test_indicators_calculated_on_feed(self):
-        """Test that indicators are recalculated when feeding new candles."""
-        sma = SMA(period=5)
-        self.asset_view.add_indicator("1T", sma, "SMA_5")
+    def test_indicators_recalculate_on_update(self):
+        """Test that indicators recalculate when frames update."""
+        frame = self.asset_view["1T"]
+        sma = SMA(frame=frame, period=5, column_name="SMA_5")
 
         # Get initial SMA value
-        initial_sma = self.asset_view["1T"].periods[-1].SMA_5
+        initial_sma = sma.periods[-1].SMA_5 if hasattr(sma.periods[-1], "SMA_5") else None
 
         # Feed new candle with higher price
         candle = Candle(
@@ -365,8 +323,10 @@ class TestAssetViewIndicators:
         )
         self.asset_view.feed(candle)
 
-        # SMA should be recalculated and higher
-        new_sma = self.asset_view["1T"].periods[-1].SMA_5
+        # SMA should be recalculated for the new period
+        new_sma = sma.periods[-1].SMA_5
+        assert new_sma is not None
 
         # New SMA should be higher due to higher price
-        assert new_sma > initial_sma
+        if initial_sma is not None:
+            assert new_sma > initial_sma

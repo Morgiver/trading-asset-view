@@ -1,10 +1,9 @@
 """AssetView - Unified multi-timeframe management for trading assets."""
 
-from typing import Dict, List, Union, Callable, Any, Optional
+from typing import Dict, List, Callable, Any, Optional
 from datetime import datetime
 import pickle
 from trading_frame import TimeFrame, Candle
-from trading_frame.indicators import Indicator
 
 
 class AssetView:
@@ -225,99 +224,6 @@ class AssetView:
         """
         return self.get_frame(timeframe)
 
-    def add_indicator(
-        self,
-        timeframe: str,
-        indicator: Indicator,
-        column_name: Union[str, List[str]]
-    ) -> None:
-        """
-        Add an indicator to a specific timeframe.
-
-        Parameters:
-            timeframe: Timeframe to add indicator to (e.g., "1T", "5T")
-            indicator: Indicator instance to add
-            column_name: Single name (str) or list of names for multi-column
-
-        Raises:
-            KeyError: If timeframe is not configured
-            ValueError: If indicator dependencies not met or column exists
-        """
-        frame = self.get_frame(timeframe)
-        frame.add_indicator(indicator, column_name)
-
-    def add_indicator_to_all(
-        self,
-        indicator: Indicator,
-        column_name: Union[str, List[str]]
-    ) -> None:
-        """
-        Add the same indicator to all timeframes.
-
-        Parameters:
-            indicator: Indicator instance to add (same instance for all)
-            column_name: Single name (str) or list of names for multi-column
-
-        Raises:
-            ValueError: If indicator dependencies not met or column exists
-        """
-        for timeframe in self._timeframes:
-            self.frames[timeframe].add_indicator(indicator, column_name)
-
-    def remove_indicator(
-        self,
-        timeframe: str,
-        column_name: Union[str, List[str]]
-    ) -> None:
-        """
-        Remove an indicator from a specific timeframe.
-
-        Parameters:
-            timeframe: Timeframe to remove indicator from
-            column_name: Single name or list of names to remove
-
-        Raises:
-            KeyError: If timeframe is not configured
-            ValueError: If indicator not found
-        """
-        frame = self.get_frame(timeframe)
-        frame.remove_indicator(column_name)
-
-    def remove_indicator_from_all(
-        self,
-        column_name: Union[str, List[str]]
-    ) -> None:
-        """
-        Remove an indicator from all timeframes.
-
-        Parameters:
-            column_name: Single name or list of names to remove
-
-        Note:
-            Silently skips timeframes where the indicator doesn't exist
-        """
-        for frame in self.frames.values():
-            try:
-                frame.remove_indicator(column_name)
-            except ValueError:
-                # Indicator doesn't exist in this frame, skip
-                pass
-
-    def get_indicator_columns(self, timeframe: str) -> List[str]:
-        """
-        Get list of all indicator column names for a timeframe.
-
-        Parameters:
-            timeframe: Timeframe to query
-
-        Returns:
-            List of indicator column names
-
-        Raises:
-            KeyError: If timeframe is not configured
-        """
-        frame = self.get_frame(timeframe)
-        return frame._get_all_indicator_columns()
 
     # ==================== HISTORICAL DATA LOADING ====================
 
@@ -491,11 +397,11 @@ class AssetView:
         Export all timeframes to numpy arrays.
 
         Returns:
-            Dictionary mapping timeframe to numpy array (OHLCV + indicators)
+            Dictionary mapping timeframe to numpy array (OHLCV)
 
         Example:
             >>> arrays = asset_view.to_numpy_all()
-            >>> print(arrays['1T'].shape)  # (120, 7) - 120 periods, 7 columns
+            >>> print(arrays['1T'].shape)  # (120, 5) - 120 periods, 5 columns (OHLCV)
         """
         result = {}
         for tf, frame in self.frames.items():
@@ -506,14 +412,12 @@ class AssetView:
         """
         Export all timeframes to normalized numpy arrays.
 
-        Each timeframe's data is normalized independently using the
-        intelligent normalization system from trading-frame:
-        - OHLC + Price-based indicators: Unified Min-Max normalization
+        Each timeframe's data is normalized independently:
+        - OHLC: Unified Min-Max normalization across all price values
         - Volume: Independent Min-Max normalization
-        - Indicators: Strategy-specific normalization (RSI: fixed 0-100, etc.)
 
         Returns:
-            Dictionary mapping timeframe to normalized numpy array
+            Dictionary mapping timeframe to normalized numpy array [0, 1]
 
         Example:
             >>> normalized = asset_view.to_normalize_all()
@@ -661,8 +565,7 @@ class AssetView:
         # Save each frame's periods
         for tf, frame in self.frames.items():
             state['frames_data'][tf] = {
-                'periods': [period.to_dict() for period in frame.periods],
-                'indicators': list(frame.indicators.keys())  # Just track which indicators exist
+                'periods': [period.to_dict() for period in frame.periods]
             }
 
         return state
@@ -762,8 +665,8 @@ class AssetView:
             - total_periods: Period count per timeframe
             - price_range: Global min/max prices
             - volume_stats: Volume statistics
-            - indicators: List of indicators per timeframe
             - latest_prices: Latest close price per timeframe
+            - timeframe_coverage: Start/end dates per timeframe
 
         Example:
             >>> stats = asset_view.get_statistics()
@@ -775,7 +678,6 @@ class AssetView:
             'total_periods': {},
             'price_range': {'min': None, 'max': None},
             'volume_stats': {'total': 0, 'avg': 0, 'min': None, 'max': None},
-            'indicators': {},
             'latest_prices': {},
             'timeframe_coverage': {}
         }
@@ -786,9 +688,6 @@ class AssetView:
         for tf, frame in self.frames.items():
             # Period counts
             stats['total_periods'][tf] = len(frame.periods)
-
-            # Indicators
-            stats['indicators'][tf] = frame._get_all_indicator_columns()
 
             if frame.periods:
                 # Latest price

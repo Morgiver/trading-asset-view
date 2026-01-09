@@ -20,6 +20,7 @@ classifiers = [
 ]
 dependencies = [
     "trading-frame @ git+https://github.com/Morgiver/trading-frame.git",
+    "trading-indicators @ git+https://github.com/Morgiver/trading-indicators.git",
 ]
 
 [project.optional-dependencies]
